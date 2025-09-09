@@ -1,25 +1,300 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
-import * as request from 'supertest';
-import { App } from 'supertest/types';
-import { AppModule } from './../src/app.module';
+import { Test } from '@nestjs/testing';
+import { AppModule } from '../src/app.module';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
+import * as pactrum from 'pactum';
+import { PrismaService } from '../src/prisma/prisma.service';
+import { AuthDto } from '../src/auth/dto';
+import { UpdateEditUser } from '../src/user/dto';
+import { CreateBookmarkDto, UpdateBookmarkDto } from '../src/bookmark/dto';
 
-describe('AppController (e2e)', () => {
-  let app: INestApplication<App>;
+describe('App e2e', () => {
+  let app: INestApplication;
+  let prisma: PrismaService;
 
-  beforeEach(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
+    app = moduleRef.createNestApplication();
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+      }),
+    );
     await app.init();
+    await app.listen(3333);
+
+    prisma = app.get(PrismaService);
+    await prisma.cleanDb();
+    pactrum.request.setBaseUrl('http://localhost:3333');
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect('Hello World!');
+  afterAll(() => {
+    app.close();
+  });
+
+  // auth test
+  describe('Auth', () => {
+    const dto: AuthDto = {
+      email: 'test@example.com',
+      password: 'Testicle@1',
+    };
+    // signup test
+    describe('Signup', () => {
+      it('should thow exception if email empty', () => {
+        return pactrum
+          .spec()
+          .post('/auth/signup')
+          .withBody({
+            password: dto.password,
+          })
+          .expectStatus(400);
+      });
+      it('should throw exception if password empty', () => {
+        return pactrum
+          .spec()
+          .post('/auth/signup')
+          .withBody({
+            email: dto.email,
+          })
+          .expectStatus(400);
+      });
+      it('should throw exception if email invalid', () => {
+        return pactrum
+          .spec()
+          .post('/auth/signup')
+          .withBody({
+            email: 'invalid-email',
+            password: dto.password,
+          })
+          .expectStatus(400);
+      });
+      it('should throw exception if password is invalid', () => {
+        return pactrum
+          .spec()
+          .post('/auth/signup')
+          .withBody({
+            email: dto.email,
+            password: 'short',
+          })
+          .expectStatus(400);
+      });
+      it('should throw exception if no body provided', () => {
+        return pactrum
+          .spec()
+          .post('/auth/signup')
+          .withBody({})
+          .expectStatus(400);
+      });
+
+      it('should signup', () => {
+        return pactrum
+          .spec()
+          .post('/auth/signup')
+          .withBody(dto)
+          .expectStatus(201)
+          .inspect()
+          .expectJsonLike({
+            user: {
+              // id: like(1),
+              id: "typeof $V === 'number'",
+              email: dto.email,
+            },
+            access_token: "typeof $V === 'string'",
+          });
+      });
+    });
+
+    // login test
+    describe('login', () => {
+      it('should throw exception if password is empty', () => {
+        return pactrum.spec().post('/auth/login').withBody({
+          email: dto.email,
+        });
+      });
+      it('should throw exception if email is empty', () => {
+        return pactrum
+          .spec()
+          .post('/auth/login')
+          .withBody({
+            password: dto.password,
+          })
+          .expectStatus(400);
+      });
+      it('should throw exception if no body is provided', () => {
+        return pactrum
+          .spec()
+          .post('/auth/login')
+          .withBody({})
+          .expectStatus(400);
+      });
+      it('should login', () => {
+        return pactrum
+          .spec()
+          .post('/auth/login')
+          .withBody(dto)
+          .expectStatus(201)
+          .inspect()
+          .stores('access_token', 'access_token');
+      });
+    });
+  });
+
+  // user test
+  describe('User', () => {
+    // profile test
+    describe('profile', () => {
+      it('should throw exception if no access token', () => {
+        return pactrum.spec().get('/user/profile').expectStatus(401);
+      });
+      it('Should get profile', () => {
+        return pactrum
+          .spec()
+          .get('/user/profile')
+          .withBearerToken('$S{access_token}')
+          .expectStatus(200);
+      });
+    });
+    // update user test
+    describe('update', () => {
+      it('should throw exception if no access token is provided', () => {
+        return pactrum.spec().patch('/user/update').expectStatus(401);
+      });
+      it('should update user', () => {
+        const updateData: UpdateEditUser = {
+          firstName: 'Testicle',
+          email: 'testicle@example.com',
+        };
+        return pactrum
+          .spec()
+          .patch('/user/update')
+          .withBearerToken('$S{access_token}')
+          .withBody(updateData)
+          .expectStatus(200)
+          .inspect()
+          .expectBodyContains(updateData.firstName);
+      });
+    });
+    // delete user test
+    describe('delete', () => {
+      it('should throw exception if no access token is provided', () => {
+        return pactrum.spec().delete('/user/delete').expectStatus(401);
+      });
+      it('should delete user', () => {
+        return pactrum
+          .spec()
+          .delete('/user/delete')
+          .withBearerToken('$S{access_token}')
+          .expectStatus(200);
+      });
+    });
+  });
+
+  // bookmark test
+  describe('Bookmark', () => {
+    // get empty bookmarks test
+    describe('Get empty bookmarks', () => {
+      it('should get bookmarks', () => {
+        return pactrum
+          .spec()
+          .get('/bookmark')
+          .withBearerToken('$S{access_token}')
+          .expectStatus(200)
+          .inspect()
+          .expectBody([]);
+      });
+    });
+
+    // create bookmark test
+    describe('create bookmark', () => {
+      const dto: CreateBookmarkDto = {
+        title: 'Test Bookmark',
+        description: 'This is a test bookmark',
+        link: 'https://example.com',
+      };
+      it('should throw exception if no access token is provided', () => {
+        return pactrum
+          .spec()
+          .post('/bookmark/create')
+          .inspect()
+          .expectStatus(401);
+      });
+      it('should create a bookmark', () => {
+        console.log('$S{access_token}');
+        return pactrum
+          .spec()
+          .post('/bookmark/create')
+          .withBearerToken('$S{access_token}')
+          .withBody(dto)
+          .expectStatus(201)
+          .stores('bookmarkId', 'id')
+          .inspect();
+      });
+    });
+
+    // get bookmarks test
+    describe('Get  bookmarks', () => {
+      it('should get bookmarks', () => {
+        return pactrum
+          .spec()
+          .get('/bookmark')
+          .withBearerToken('$S{access_token}')
+          .expectStatus(200)
+          .inspect()
+          .expectJsonLength(1);
+      });
+    });
+
+    // get bookmark by id test
+    describe('Get Bookmark by ID', () => {
+      it('should get bookmark by id ', () => {
+        return pactrum
+          .spec()
+          .get('/bookmark/${id}')
+          .withPathParams('id', '$S{bookmarkId}')
+          .withBearerToken('$S{access_token}')
+          .expectBodyContains('$S{bookmarkId}')
+          .expectStatus(200);
+      });
+    });
+
+    // update bookmark test
+    describe('update bookmark', () => {
+      const dto: UpdateBookmarkDto = {
+        title: 'freaking update',
+      };
+      it('should update a bookmark', () => {
+        return pactrum
+          .spec()
+          .patch('/bookmark/{id}')
+          .withPathParams('id', '$S{bookmarkId}')
+          .withBody(dto)
+          .withBearerToken('$S{access_token}')
+          .expectStatus(201)
+          .expectBodyContains(dto.title)
+          .expectBodyContains(dto.description);
+      });
+    });
+
+    // delete bookmark test
+    describe('Delete Bookmark by ID ', () => {
+      it('should delete bookmark', () => {
+        return pactrum
+          .spec()
+          .delete('/bookmark/{id}')
+          .withPathParams('id', '$S{bookmarkId}')
+          .withBearerToken('$S{access_token}')
+          .expectStatus(204);
+      });
+      it('should get empty bookmarks', () => {
+        return pactrum
+          .spec()
+          .get('/bookmark')
+          .withBearerToken('$S{access_token}')
+          .expectStatus(200)
+          .expectJsonLength(0);
+      });
+    });
   });
 });

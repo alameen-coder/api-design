@@ -14,19 +14,23 @@ datasource db {
   provider  = "postgresql"
   url  	    = env("DATABASE_URL")
   // uncomment next line if you use Prisma <5.10
-  directUrl = env("DATABASE_URL_UNPOOLED")
+  // directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 model User {
   id  Int     @id @default(autoincrement())
   email String @unique
-  hashpassword String
+  hashpassword String 
 
   firstName String?
   lastName String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@map("users")
+
+  Bookmark Bookmark[]
 }
 
 model Bookmark {
@@ -38,4 +42,8 @@ model Bookmark {
  createdAt DateTime @default(now())
  updatedAt DateTime @updatedAt
 
+  userId Int
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("bookmarks")
 }
