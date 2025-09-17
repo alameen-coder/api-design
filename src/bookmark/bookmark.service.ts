@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBookmarkDto, UpdateBookmarkDto } from './dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class BookmarkService {
@@ -40,16 +41,27 @@ export class BookmarkService {
     updateBookmark: UpdateBookmarkDto,
     bookmarkId: number,
   ) {
-    const bookmark = await this.prisma.bookmark.update({
-      where: { id: bookmarkId },
-      data: updateBookmark,
-    });
-    if (bookmark?.userId !== userId) {
-      throw new ForbiddenException(
-        `This bookmark is not available for user ${userId}`,
-      );
+    try {
+      const bookmark = await this.prisma.bookmark.update({
+        where: { id: bookmarkId },
+        data: updateBookmark,
+      });
+      if (bookmark?.userId !== userId) {
+        throw new ForbiddenException(
+          `This bookmark is not available for user ${userId}`,
+        );
+      }
+      return bookmark;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2025') {
+          throw new ForbiddenException(
+            `This bookmark is not available for user ${userId}`,
+          );
+        }
+        throw error;
+      }
     }
-    return bookmark;
   }
 
   async delete(userId: number, bookmarkId: number) {
